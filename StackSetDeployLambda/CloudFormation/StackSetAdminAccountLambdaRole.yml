@@ -1,0 +1,39 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates IAM role to be used by StackSetDeploy Lambda Function
+Parameters:
+  RoleName:
+    Type: String
+    Default: CodePipelineStackSetLambdaRole
+  StackSetLambdaExecutionRoleArn:
+    Type: String
+    Description: ARN of StackSetLambda execution role.
+Resources:
+  CodePipelineStackSetLambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            AWS: !Ref StackSetLambdaExecutionRoleArn
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: CodePipelineStackSetLambdaRolePolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - cloudformation:CreateStackSet
+            - cloudformation:CreateStackInstances
+            - cloudformation:DescribeStackSet
+            - cloudformation:DeleteStackInstances
+            - cloudformation:UpdateStackSet
+            - cloudformation:ListStackInstances
+            - cloudformation:ListStackSetOperations
+            - cloudformation:ListStackSetOperationResults
+            Resource: "*"

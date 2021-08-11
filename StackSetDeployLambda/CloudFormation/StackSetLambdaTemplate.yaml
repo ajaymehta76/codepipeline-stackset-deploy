@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  This template creates the StackSetDeploy Lambda which provides
+  ability to deploy to CloudFormation stacksets from within CodePipeline.
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "StackSet Deploy Lambda Settings"
+        Parameters:
+          - StackSetAdminAccount
+          - StackSetAdminAccountRoleName
+
+    ParameterLabels:
+      StackSetAdminAccount:
+        default: StackSetAdminAccount
+      StackSetAdminAccountRoleName:
+        default: StackSetAdminAccountRoleName
+
+Parameters:
+  StackSetAdminAccount:
+    Type: String
+    Description: StackSet Admin Account
+  StackSetAdminAccountRoleName:
+    Type: String
+    Default: CodePipelineStackSetLambdaRole
+    Description: Role in StackSet Admin account that Lambda will assume
+
+Resources:
+  StackSetDeployLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: StackSetDeployLambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: StackSetDeployLambdaPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource: !Sub "arn:aws:iam::${StackSetAdminAccount}:role/${StackSetAdminAccountRoleName}"
+          - Effect: Allow
+            Action:
+              - codepipeline:PutJobSuccessResult
+              - codepipeline:PutJobFailureResult
+            Resource: "*"
+          - Sid: AccessToCloudWatchLogs
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !GetAtt StackSetDeployLambdaLogGroup.Arn
+
+  StackSetDeployLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/StackSetDeployFunction'
+      RetentionInDays: 30
+
+  StackSetDeployFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: StackSetDeployLambdaExecutionRole
+    Properties:
+      Code: ../src/StackSetDeployFunction.zip
+      Description: 'Lambda Function to deploy CloudFormation StackSets using Code Pipeline'
+      FunctionName: StackSetDeployFunction
+      Handler: StackSetDeployFunction.lambda_handler
+      MemorySize: 128
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/StackSetDeployLambdaExecutionRole
+      Runtime: python3.8
+      Environment:
+        Variables:
+          STACK_SET_ADMIN_ACCOUNT: !Ref StackSetAdminAccount
+          ROLE_NAME: !Ref StackSetAdminAccountRoleName
+      Timeout: 60
+
+Outputs:
+  ## This Role ARN should be passed as input when creating StackSetAdminCrossAccountRole
+  ## stack in the stackset admin account
+  StackSetDeployLambdaRole:
+    Description: StackSetDeploy Lambda execution role ARN.
+    Value: !Ref StackSetDeployLambdaExecutionRole
+  StackSetDeployLambdaFunctionName:
+    Description: StackSetDeploy Lambda function name
+    Value: !Ref StackSetDeployFunction
+    Export:
+      Name: StackSetDeployLambdaFunctionName

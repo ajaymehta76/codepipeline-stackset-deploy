@@ -1,0 +1,8 @@
+{
+    "Parameters" : {
+        "S3BlockPublicAcls" : "True",
+        "S3IgnorePublicAcls": "True",
+        "S3BlockPublicPolicy": "True",
+        "S3RestrictPublicBuckets": "True"
+    }
+}

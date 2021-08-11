@@ -1,0 +1,167 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation template to control S3 Block Public Access Setting '
+Parameters:
+  S3BlockPublicAcls:
+    Type: String
+    Description: Block new public ACLs and uploading public objects (Recommended)
+    AllowedValues:
+      - 'True'
+      - 'False'
+    Default: 'True'
+  S3IgnorePublicAcls:
+    Type: String
+    Description: Remove public access granted through public ACLs (Recommended)
+    AllowedValues:
+      - 'True'
+      - 'False'
+    Default: 'True'
+  S3BlockPublicPolicy:
+    Type: String
+    Description: Block new public bucket policies (Recommended)
+    AllowedValues:
+      - 'True'
+      - 'False'
+    Default: 'True'
+  S3RestrictPublicBuckets:
+    Type: String
+    Description: Block public and cross-account access to buckets that have public policies (Recommended)
+    AllowedValues:
+      - 'True'
+      - 'False'
+    Default: 'True'
+
+Resources:
+  S3BlockPublicAccess:
+    Type: Custom::S3BlockPublicAccess
+    Properties:
+      ServiceToken:
+        Fn::GetAtt:
+        - S3BlockPublicAccessFunction
+        - Arn
+      AccountId: !Ref AWS::AccountId
+      S3BlockPublicAcls: !Ref S3BlockPublicAcls
+      S3IgnorePublicAcls: !Ref S3IgnorePublicAcls
+      S3BlockPublicPolicy: !Ref S3BlockPublicPolicy
+      S3RestrictPublicBuckets: !Ref S3RestrictPublicBuckets
+
+  S3BlockPublicAccessLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: root
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Effect: Allow
+            Action:
+            - s3:GetAccountPublicAccessBlock
+            - s3:PutAccountPublicAccessBlock
+            Resource: "*"
+
+  S3BlockPublicAccessFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+         import logging
+         import sys
+         import os
+         import ast
+
+         import botocore
+         import boto3
+         import json
+         import cfnresponse
+
+         print("boto3 version:"+boto3.__version__)
+         print("botocore version:"+botocore.__version__)
+
+         def lambda_handler(event, context):
+             global log
+             log = logging.getLogger()
+             setup_logger(log)
+             log.info(json.dumps(event))
+             response_data = {}
+             requestType = event['RequestType']
+
+             if requestType != 'Create' and requestType != 'Update' and requestType != 'Delete':
+                 cfnresponse.send(event, context, 'SUCCESS', response_data)
+                 exit(0)
+
+             s3control_client = boto3.client('s3control')
+             accountId = event['ResourceProperties']['AccountId']
+
+             if requestType == 'Delete':
+                 try:
+                   log.info("Deleting S3 Block Public Access for account: " + accountId)
+                   response = s3control_client.delete_public_access_block(
+                         AccountId = accountId)
+                   log.info("Done deleting S3 Block Public Access settings")
+                 except Exception as e:
+                   log.error("Error configuring S3 Blcok Public Access settings")
+                   do_err(e,event, context)
+
+             else: # create/update scenario
+                 blockPublicAcls = ast.literal_eval(event["ResourceProperties"]['S3BlockPublicAcls'])
+                 ignorePublicAcls = ast.literal_eval(event["ResourceProperties"]['S3IgnorePublicAcls'])
+                 blockPublicPolicy = ast.literal_eval(event["ResourceProperties"]['S3BlockPublicPolicy'])
+                 restrictPublicBuckets = ast.literal_eval(event["ResourceProperties"]['S3RestrictPublicBuckets'])
+
+                 try:
+                   log.info("Configuring S3 Block Public Access for account: " + accountId)
+                   log.info("BlockPublicAcls: " + str(blockPublicAcls) + "\n" +
+                             "IgnorePublicAcls: " + str(ignorePublicAcls) + "\n" +
+                             "BlockPublicPolicy: " + str(blockPublicPolicy) + "\n" +
+                             "RestrictPublicBuckets: " + str(restrictPublicBuckets))
+                   response = s3control_client.put_public_access_block(
+                         PublicAccessBlockConfiguration={
+                             'BlockPublicAcls': blockPublicAcls,
+                             'IgnorePublicAcls': ignorePublicAcls,
+                             'BlockPublicPolicy': blockPublicPolicy,
+                             'RestrictPublicBuckets': restrictPublicBuckets
+                         },
+                         AccountId=accountId
+                     )
+                   log.info("Done configuring S3 Block Public Access settings")
+                 except Exception as e:
+                   log.error("Error configuring S3 Block Public Access settings")
+                   do_err(e,event, context)
+
+             # Send response to CloudFormation
+             cfnresponse.send(event, context, 'SUCCESS', response_data)
+
+         def setup_logger(log):
+             log_levels = {'INFO': 20, 'WARNING': 30, 'ERROR': 40}
+             log.setLevel(log_levels['INFO'])
+
+         def do_err(e, event, context):
+             log.error(e)
+             response_data = {}
+             cfnresponse.send(event, context, 'FAILED', response_data)
+             exit(1)
+
+      Handler:
+        index.lambda_handler
+      Role:
+        Fn::GetAtt:
+        - S3BlockPublicAccessLambdaExecutionRole
+        - Arn
+      Runtime: python3.6
+      Timeout: 30

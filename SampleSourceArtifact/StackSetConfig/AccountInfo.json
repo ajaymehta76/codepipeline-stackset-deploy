@@ -1,0 +1,17 @@
+{
+    "Accounts": [
+        <COMMA SEPARATED LIST OF ACCOUNTS FOR STACK SET DEPLOYMENT>
+    ],
+    "Regions": [
+        <COMMA SEPARATED LIST OF REGIONS FOR STACK SET DEPLOYMENT>
+    ],
+    "OperationPreferences": {
+        "RegionOrder": [
+            "us-east-1",
+            "us-east-2"
+
+        ],
+        "FailureToleranceCount": 1,
+        "MaxConcurrentCount": 5
+    }
+}

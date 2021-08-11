@@ -1,0 +1,19 @@
+{
+    "Accounts": [
+        "002811484531",
+        "378283848513"
+    ],
+    "Regions": [
+        "us-east-1",
+        "us-east-2"
+    ],
+    "OperationPreferences": {
+        "RegionOrder": [
+            "us-east-1",
+            "us-east-2"
+
+        ],
+        "FailureToleranceCount": 1,
+        "MaxConcurrentCount": 1
+    }
+}

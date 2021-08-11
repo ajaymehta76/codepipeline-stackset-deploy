@@ -1,0 +1,377 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  This template creates a sample CodePipeline that uses the StackSetDeployLambda
+  to deploy a CloudFormation Stackset to accounts and regions as specified in AccountInfo.json
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Pipeline Settings"
+        Parameters:
+          - PipelineName
+          - CodePipelineArtifactStoreS3BucketName
+          - PipelineArtifactSourceS3BucketName
+          - PipelineSourceArtifactZip
+      - Label:
+          default: "CloudFormation StackSet Settings"
+        Parameters:
+          - StackSetName
+          - StackSetRegion
+
+Parameters:
+  PipelineArtifactSourceS3BucketName:
+    Type: String
+    Description: S3 bucket name for staging source artifacts
+    Default: pipeline-source-002811484531-us-east-1
+  PipelineSourceArtifactZip:
+    Type: String
+    Description: Source artifact zip file
+    Default: S3BlockPublicAccess.zip
+  CodePipelineArtifactStoreS3BucketName:
+    Type: String
+    Description: S3 bucket name for codepipeline artifacts
+    Default: pipeline-artifact-002811484531-us-east-1
+  StackSetRegion:
+    Type: String
+    Default: us-east-1
+  PipelineName:
+    Type: String
+    Default: DataProtection
+  StackSetName:
+    Type: String
+    Default: S3BlockPublicAccess
+
+Outputs:
+  DataProtectionCodePipelineURL:
+    Value: !Sub "https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${PipelineName}"
+    Export:
+      Name: DataProtectionCodePipelineURL
+
+Resources:
+
+  CWECodePipelineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CWECodePipelineExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - events.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: CWECodePipelineExecutionPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - codepipeline:StartPipelineExecution
+            Resource:
+            - '*'
+
+  PipelineArtifactsSourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref PipelineArtifactSourceS3BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  CodePipelineArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref CodePipelineArtifactStoreS3BucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  PipelineIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${PipelineName}-Role'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub '${PipelineName}-Policy'
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: PermissionsToAccessArtifactBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${CodePipelineArtifactBucket}*'
+                  - !Sub 'arn:aws:s3:::${CodePipelineArtifactBucket}*/*'
+              - Sid: PermissionsToAccessSourceBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${PipelineArtifactsSourceBucket}*'
+                  - !Sub 'arn:aws:s3:::${PipelineArtifactsSourceBucket}*/*'
+              - Sid: AllowLambdaPermissions
+                Effect: Allow
+                Action:
+                  - lambda:invokefunction
+                  - lambda:listfunctions
+                Resource: "*"
+              - Sid: AllowCloudFormationPermissions
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DeleteStack
+                Resource: "*"
+              - Sid: AllowCodeBuildPermissions
+                Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource: "*"
+              - Sid: CFExecutionPassRole
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt CFExecutionRole.Arn
+
+  CFExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CFExecutionRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: CFExecutionRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: PermissionsToAccessArtifactBucket
+                Effect: Allow
+                Action:
+                  - lambda:*
+                  - iam:*
+                  - logs:*
+                Resource: '*'
+
+  CodeBuildIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${PipelineName}CodeBuildProjectRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub '${PipelineName}CodeBuildProjectRolePolicy'
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: PermissionsToAccessArtifactBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${CodePipelineArtifactBucket}*'
+                  - !Sub 'arn:aws:s3:::${CodePipelineArtifactBucket}*/*'
+              - Sid: PermissionsToAccessSourceBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${PipelineArtifactsSourceBucket}*'
+                  - !Sub 'arn:aws:s3:::${PipelineArtifactsSourceBucket}*/*'
+              - Sid: AllowCodeBuildPermissions
+                Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  DataProtectionCodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Type: S3
+        Location: !Ref CodePipelineArtifactBucket
+      Name: !Ref PipelineName
+      RoleArn: !GetAtt PipelineIAMRole.Arn
+      Stages:
+      - Name: Source
+        Actions:
+        - Name: !Sub '${PipelineName}Source'
+          ActionTypeId:
+            Category: Source
+            Owner: AWS
+            Version: '1'
+            Provider: S3
+          OutputArtifacts:
+          - Name: !Sub '${PipelineName}Artifacts'
+          Configuration:
+            S3Bucket: !Sub '${PipelineArtifactsSourceBucket}'
+            PollForSourceChanges: 'false'
+            S3ObjectKey: !Sub '${PipelineName}/${PipelineSourceArtifactZip}'
+          RunOrder: 1
+      - Name: Validation
+        Actions:
+        - Name: CFN-NAGCheck
+          InputArtifacts:
+          - Name: !Sub '${PipelineName}Artifacts'
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: '1'
+            Provider: CodeBuild
+          Configuration:
+            ProjectName: !Ref CodeBuildProject
+          RunOrder: 1
+      - Name: Testing
+        Actions:
+        - Name: !Sub '${StackSetName}-Deploy-Local'
+          InputArtifacts:
+          - Name: !Sub '${PipelineName}Artifacts'
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Version: '1'
+            Provider: CloudFormation
+          Configuration:
+            ActionMode: CREATE_UPDATE
+            RoleArn: !GetAtt CFExecutionRole.Arn
+            Capabilities: CAPABILITY_NAMED_IAM
+            StackName: !Ref StackSetName
+            TemplateConfiguration: !Sub '${PipelineName}Artifacts::S3BlockPublicAccess/params.json'
+            TemplatePath: !Sub '${PipelineName}Artifacts::S3BlockPublicAccess/cfn.yml'
+          RunOrder: 1
+      - Name: ManualApproval
+        Actions:
+        - Name: ApproveDeploymentOfStackSet
+          ActionTypeId:
+            Category: Approval
+            Owner: AWS
+            Version: '1'
+            Provider: Manual
+          RunOrder: 1
+      - Name: DeployStackSet
+        Actions:
+        - Name: !Sub '${StackSetName}Deployment'
+          InputArtifacts:
+          - Name: !Sub '${PipelineName}Artifacts'
+          ActionTypeId:
+            Category: Invoke
+            Owner: AWS
+            Version: '1'
+            Provider: Lambda
+          Configuration:
+            FunctionName: !ImportValue StackSetDeployLambdaFunctionName
+            UserParameters: !Sub '{"StackSetName": "${StackSetName}","StackSetRegion":"${StackSetRegion}",
+              "TemplateInfo": "{\"TemplateFile\": \"S3BlockPublicAccess\/cfn.yml\",\"TemplateParamFile\": \"S3BlockPublicAccess\/params.json\", \"Capabilities\": \"CAPABILITY_NAMED_IAM\", \"Artifact\": \"${PipelineName}Artifacts\"}",
+              "AccountInfo": "{\"FileName\": \"StackSetConfig\/AccountInfo-Example.json\", \"Artifact\": \"${PipelineName}Artifacts\"}"}'
+          RunOrder: 1
+
+  CodeBuildProject:
+      Type: AWS::CodeBuild::Project
+      Properties:
+        Artifacts:
+          Packaging: NONE
+          Type: CODEPIPELINE
+        Description: CodeBuild Project to run cfn-nag    # optional
+        Environment:
+          ComputeType: BUILD_GENERAL1_SMALL
+          PrivilegedMode: false
+          Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+          Type: LINUX_CONTAINER
+          EnvironmentVariables:
+            # - Name: INPUT_ARTIFACT
+            #   Value: !Ref InputArtifactParameter
+            - Name: TEMPLATE_PATH
+              Value: 'S3BlockPublicAccess/'
+            - Name: TEMPLATE_SELECTOR
+              Value: '..*\\.yaml|..*\\.yml'
+        Name: CFNNagCodeBuildProject     # optional
+        ServiceRole: !GetAtt CodeBuildIAMRole.Arn
+        Source:
+          Type: CODEPIPELINE
+        TimeoutInMinutes: 5
+
+  TriggerCodePipelineRule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Name: DataProtectionPipelinelineTrigger
+      Description: !Sub 'Triggers ${PipelineName} code pipeline'
+      EventPattern:
+        source:
+          - "aws.s3"
+        detail-type:
+          - "AWS API Call via CloudTrail"
+        detail:
+          eventSource:
+            - "s3.amazonaws.com"
+          eventName:
+            - "PutObject"
+          resources:
+            "ARN":
+              - !Sub "arn:aws:s3:::${PipelineArtifactsSourceBucket}/${PipelineName}/${PipelineSourceArtifactZip}"
+      State: ENABLED
+      Targets:
+        -
+          Arn: !Sub 'arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${PipelineName}'
+          Id: "TargetDataProtectionPipeline"
+          RoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/CWECodePipelineExecutionRole'
+
+Outputs:
+  PipelineArtifactsSourceBucket:
+    Description: S3 bucket for Source artifacts
+    Value: !Ref PipelineArtifactsSourceBucket

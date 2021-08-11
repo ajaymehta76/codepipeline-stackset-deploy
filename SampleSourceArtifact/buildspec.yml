@@ -1,0 +1,30 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      ruby: latest
+    commands:
+        - gem install cfn-model
+        - gem install cfn-nag
+  pre_build:
+    commands:
+        - printenv
+        - ruby -v
+  build:
+    commands:
+        - echo Build started on `date`
+        - cfn_nag_rules
+        # - echo "Input Artifact:"
+        # - echo $INPUT_ARTIFACT
+        - echo "Template Directory:"
+        - echo $TEMPLATE_PATH
+        - echo "Template File Selector:"
+        - echo $TEMPLATE_SELECTOR
+#        - echo "Downloading input artifacts from s3"
+        # - aws s3 cp $INPUT_ARTIFACT InputArtifacts.zip
+        # - echo "Unzipping artifacts"
+        # - unzip -q InputArtifacts.zip -d unzippedArtifacts
+        - echo "Running cfn-nag on $$CODEBUILD_SRC_DIR/$TEMPLATE_PATH ..."
+        - cfn_nag_scan -i $CODEBUILD_SRC_DIR/$TEMPLATE_PATH -t $TEMPLATE_SELECTOR
+        - echo "Done"
